@@ -69,6 +69,16 @@ async def scrapear_pagina_resultados(page, url: str) -> list[dict]:
 
     keywords_juegos = ["game", "games", "ps4", "ps5", "xbox", "nintendo",
                         "switch", "playstation", "edition", "collection", "bundle"]
+    # ponytail: filtro por palabras clave en el título, no por categoría real de
+    # Amazon -> deja pasar falsos positivos (libros, alfombras gamer, handhelds).
+    # Si el ruido molesta, subir a PA-API (trae categoría exacta) o revisar a mano
+    # antes de que el pedido se marque "disponible".
+    keywords_accesorios = [
+        "keyboard", "headset", "headphone", "controller", "charger", "charging",
+        "cable", "case", "skin", "cooling", "cooler", "stand", "shelf", "rack",
+        "dock", "adapter", "cord", "mouse", "joystick", "mount", "grip",
+        "screen protector", "sd card", "memory card", "backpack", "bag", "cover",
+    ]
 
     for tarjeta in tarjetas:
         try:
@@ -82,7 +92,12 @@ async def scrapear_pagina_resultados(page, url: str) -> list[dict]:
                 tarjeta.select_one("h2 span")
             )
             titulo = titulo_el.get_text(strip=True) if titulo_el else None
-            if not titulo or not any(kw in titulo.lower() for kw in keywords_juegos):
+            if not titulo:
+                continue
+            titulo_lower = titulo.lower()
+            if not any(kw in titulo_lower for kw in keywords_juegos):
+                continue
+            if any(kw in titulo_lower for kw in keywords_accesorios):
                 continue
 
             link_el = tarjeta.select_one("h2 a")
