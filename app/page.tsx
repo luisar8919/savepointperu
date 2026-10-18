@@ -1,5 +1,7 @@
 import { supabase } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic"; // el catálogo cambia con cada scrape, no debe quedar cacheado
+
 type Product = {
   id: string;
   titulo: string;
@@ -8,11 +10,13 @@ type Product = {
 };
 
 export default async function Catalogo() {
-  const { data: productos } = await supabase
+  const { data: productos, error } = await supabase
     .from("products")
     .select("id, titulo, precio_venta_usd, imagen_url")
     .eq("disponible", true)
     .returns<Product[]>();
+
+  if (error) console.error("Error consultando products:", error);
 
   return (
     <main className="max-w-5xl mx-auto p-6">
