@@ -5,14 +5,17 @@ export const dynamic = "force-dynamic"; // el catálogo cambia con cada scrape, 
 type Product = {
   id: string;
   titulo: string;
-  precio_venta_usd: number;
+  precio_venta: number;
+  moneda: string;
   imagen_url: string | null;
 };
+
+const SIMBOLOS: Record<string, string> = { USD: "$", PEN: "S/" };
 
 export default async function Catalogo() {
   const { data: productos, error } = await supabase
     .from("products")
-    .select("id, titulo, precio_venta_usd, imagen_url")
+    .select("id, titulo, precio_venta, moneda, imagen_url")
     .eq("disponible", true)
     .returns<Product[]>();
 
@@ -29,7 +32,9 @@ export default async function Catalogo() {
               <img src={p.imagen_url} alt={p.titulo} className="w-full h-32 object-contain mb-2" />
             )}
             <p className="text-sm font-medium">{p.titulo}</p>
-            <p className="text-lg font-bold">${p.precio_venta_usd.toFixed(2)}</p>
+            <p className="text-lg font-bold">
+              {SIMBOLOS[p.moneda] ?? p.moneda} {p.precio_venta.toFixed(2)}
+            </p>
           </div>
         ))}
         {(!productos || productos.length === 0) && (

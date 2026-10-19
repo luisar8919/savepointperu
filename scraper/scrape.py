@@ -41,24 +41,13 @@ def limpiar_precio(texto: str) -> float | None:
         return None
 
 
-def obtener_tasa_pen_a_usd() -> float:
-    """Amazon muestra precios en soles cuando detecta IP peruana, aunque la
-    URL sea amazon.com. Sin esto, todo el catálogo queda sobrevalorado ~3.6x."""
-    try:
-        r = requests.get("https://open.er-api.com/v6/latest/PEN", timeout=10)
-        r.raise_for_status()
-        return r.json()["rates"]["USD"]
-    except Exception as e:
-        print(f"No se pudo obtener tasa PEN->USD, uso 0.27 por defecto: {e}")
-        return 0.27
-
-
-def a_usd(precio: float | None, texto_original: str | None, tasa_pen_usd: float) -> float | None:
-    if precio is None:
-        return None
-    if texto_original and "PEN" in texto_original.upper():
-        return round(precio * tasa_pen_usd, 2)
-    return precio
+def detectar_moneda(texto: str | None) -> str:
+    """Amazon muestra precios en la moneda local según la IP (acá, PEN),
+    aunque la URL sea amazon.com. No convertimos: guardamos el precio tal
+    cual lo vas a pagar, junto con en qué moneda está."""
+    if texto and "PEN" in texto.upper():
+        return "PEN"
+    return "USD"
 
 
 def calcular_descuento(precio_original, precio_actual):
@@ -67,7 +56,7 @@ def calcular_descuento(precio_original, precio_actual):
     return None
 
 
-async def scrapear_pagina_resultados(page, url: str, tasa_pen_usd: float) -> list[dict]:
+async def scrapear_pagina_resultados(page, url: str) -> list[dict]:
     ofertas = []
     print(f"Navegando a: {url}")
     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
@@ -132,14 +121,15 @@ async def scrapear_pagina_resultados(page, url: str, tasa_pen_usd: float) -> lis
                 tarjeta.select_one("span.a-price-whole")
             )
             precio_actual_txt = precio_el.get_text(strip=True) if precio_el else None
-            precio_actual = a_usd(limpiar_precio(precio_actual_txt), precio_actual_txt, tasa_pen_usd)
+            precio_actual = limpiar_precio(precio_actual_txt)
+            moneda = detectar_moneda(precio_actual_txt)
 
             precio_original_el = (
                 tarjeta.select_one(".a-price.a-text-price .a-offscreen") or
                 tarjeta.select_one("span.a-text-price .a-offscreen")
             )
             precio_original_txt = precio_original_el.get_text(strip=True) if precio_original_el else None
-            precio_original = a_usd(limpiar_precio(precio_original_txt), precio_original_txt, tasa_pen_usd)
+            precio_original = limpiar_precio(precio_original_txt)
 
             if not precio_original:
                 # sin precio de referencia no podemos calcular precio_venta
@@ -157,9 +147,10 @@ async def scrapear_pagina_resultados(page, url: str, tasa_pen_usd: float) -> lis
                 "titulo": titulo,
                 "url_producto": url_producto,
                 "imagen_url": imagen_url,
-                "precio_normal_usd": precio_original,
-                "precio_oferta_usd": precio_actual,
-                "precio_venta_usd": round(precio_original * MARGEN, 2),
+                "moneda": moneda,
+                "precio_normal": precio_original,
+                "precio_oferta": precio_actual,
+                "precio_venta": round(precio_original * MARGEN, 2),
                 "disponible": True,
                 "actualizado_at": datetime.now().isoformat(),
             })
@@ -170,11 +161,11 @@ async def scrapear_pagina_resultados(page, url: str, tasa_pen_usd: float) -> lis
     return ofertas
 
 
-async def scrapear_multiples_paginas(page, url_base: str, tasa_pen_usd: float, max_paginas: int = 3) -> list[dict]:
+async def scrapear_multiples_paginas(page, url_base: str, max_paginas: int = 3) -> list[dict]:
     todas = []
     for n_pagina in range(1, max_paginas + 1):
         url = f"{url_base}&page={n_pagina}" if n_pagina > 1 else url_base
-        resultado = await scrapear_pagina_resultados(page, url, tasa_pen_usd)
+        resultado = await scrapear_pagina_resultados(page, url)
         todas.extend(resultado)
         if not resultado:
             break
@@ -183,8 +174,6 @@ async def scrapear_multiples_paginas(page, url_base: str, tasa_pen_usd: float, m
 
 
 async def scrapear_ofertas() -> list[dict]:
-    tasa_pen_usd = obtener_tasa_pen_a_usd()
-    print(f"Tasa PEN->USD: {tasa_pen_usd}")
     todas_las_ofertas = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -209,7 +198,7 @@ async def scrapear_ofertas() -> list[dict]:
         page = await context.new_page()
 
         for url in URLS_OBJETIVO:
-            ofertas = await scrapear_multiples_paginas(page, url, tasa_pen_usd, max_paginas=3)
+            ofertas = await scrapear_multiples_paginas(page, url, max_paginas=3)
             todas_las_ofertas.extend(ofertas)
             await asyncio.sleep(random.uniform(4, 7))
 
@@ -260,10 +249,10 @@ def main():
 
     guardar_en_supabase(ofertas)
 
-    top = sorted(ofertas, key=lambda o: o["precio_normal_usd"] - o["precio_oferta_usd"], reverse=True)[:5]
+    top = sorted(ofertas, key=lambda o: o["precio_normal"] - o["precio_oferta"], reverse=True)[:5]
     lineas = [f"🎮 {len(ofertas)} ofertas encontradas hoy:"]
     for o in top:
-        lineas.append(f"- {o['titulo'][:50]} → venta ${o['precio_venta_usd']} (compra ${o['precio_oferta_usd']})")
+        lineas.append(f"- {o['titulo'][:50]} → venta {o['moneda']} {o['precio_venta']} (compra {o['moneda']} {o['precio_oferta']})")
     avisar_telegram("\n".join(lineas))
 
 

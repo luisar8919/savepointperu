@@ -5,9 +5,10 @@ create table products (
   titulo text not null,
   url_producto text,
   imagen_url text,
-  precio_normal_usd numeric,       -- precio de referencia sin descuento
-  precio_oferta_usd numeric,       -- último precio visto en Amazon
-  precio_venta_usd numeric,        -- precio_normal_usd * 1.3
+  moneda text not null default 'USD', -- la que muestre Amazon según la IP del scraper, sin convertir
+  precio_normal numeric,            -- precio de referencia sin descuento
+  precio_oferta numeric,            -- último precio visto en Amazon
+  precio_venta numeric,             -- precio_normal * 1.3
   disponible boolean default false,
   actualizado_at timestamptz default now()
 );
