@@ -101,6 +101,7 @@ async def scrapear_pagina_resultados(
         "div.s-result-item[data-asin]:not([data-asin=''])"
     )
     print(f"Tarjetas encontradas: {len(tarjetas)}")
+    agoto_pagina = True
 
     keywords_juegos = ["game", "games", "ps4", "ps5", "xbox", "nintendo",
                         "switch", "playstation", "edition", "collection", "bundle"]
@@ -172,6 +173,7 @@ async def scrapear_pagina_resultados(
                     continue
                 precio_usd_equiv = precio_actual * tasa_pen_usd if moneda == "PEN" else precio_actual
                 if precio_usd_equiv > PRECIO_MAX_BARATOS_USD:
+                    agoto_pagina = False
                     break
                 precio_original = precio_original or precio_actual
                 descuento_num = calcular_descuento(precio_original, precio_actual) or 0
@@ -196,14 +198,14 @@ async def scrapear_pagina_resultados(
             print(f"Error en tarjeta: {e}")
             continue
 
-    return ofertas
+    return ofertas, agoto_pagina
 
 
 async def scrapear_multiples_paginas(page, url_base: str, max_paginas: int = 3) -> list[dict]:
     todas = []
     for n_pagina in range(1, max_paginas + 1):
         url = f"{url_base}&page={n_pagina}" if n_pagina > 1 else url_base
-        resultado = await scrapear_pagina_resultados(page, url)
+        resultado, _ = await scrapear_pagina_resultados(page, url)
         todas.extend(resultado)
         if not resultado:
             break
@@ -213,13 +215,24 @@ async def scrapear_multiples_paginas(page, url_base: str, max_paginas: int = 3) 
 
 async def scrapear_baratos(page, tasa_pen_usd: float) -> list[dict]:
     """Juegos de Switch/Switch 2/PS5/PS4 por debajo de PRECIO_MAX_BARATOS_USD,
-    sin importar si tienen descuento o no."""
+    sin importar si tienen descuento o no. Pagina hasta 3 páginas por
+    plataforma, o hasta que un precio se pase del tope (lo que pase primero) —
+    la página 1 suele venir llena de accesorios baratos, los juegos reales
+    aparecen más adelante."""
     todos = []
     for plataforma, url in URLS_BARATOS.items():
-        resultado = await scrapear_pagina_resultados(page, url, requiere_descuento=False, tasa_pen_usd=tasa_pen_usd)
-        print(f"{plataforma}: {len(resultado)} juegos bajo ${PRECIO_MAX_BARATOS_USD}")
-        todos.extend(resultado)
-        await asyncio.sleep(random.uniform(3, 6))
+        encontrados = 0
+        for n_pagina in range(1, 4):
+            url_pag = f"{url}&page={n_pagina}" if n_pagina > 1 else url
+            resultado, agoto_pagina = await scrapear_pagina_resultados(
+                page, url_pag, requiere_descuento=False, tasa_pen_usd=tasa_pen_usd
+            )
+            todos.extend(resultado)
+            encontrados += len(resultado)
+            await asyncio.sleep(random.uniform(3, 6))
+            if not agoto_pagina or not resultado:
+                break  # se pasó del tope de precio o no hay más resultados
+        print(f"{plataforma}: {encontrados} juegos bajo ${PRECIO_MAX_BARATOS_USD}")
     return todos
 
 
@@ -241,6 +254,9 @@ async def scrapear_ofertas() -> list[dict]:
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             },
         )
+        # Sin esto Amazon muestra PEN (u otra moneda local) según la IP, aunque
+        # la URL sea amazon.com. Este cookie fuerza USD de forma confiable.
+        await context.add_cookies([{"name": "i18n-prefs", "value": "USD", "domain": ".amazon.com", "path": "/"}])
         await context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
