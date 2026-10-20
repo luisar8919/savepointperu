@@ -27,12 +27,15 @@ ESPERA_ENTRE_BUSQUEDAS_SEG = (10, 20)  # pausa aleatoria entre cada búsqueda/p�
 TAREAS = [
     ("Ofertas (deals)", "https://www.amazon.com/deals?deals-widget=%7B%22version%22%3A1%2C%22browseNodeId%22%3A%22468642%22%7D", True),
     ("Ofertas (búsqueda)", "https://www.amazon.com/s?i=videogames&bbn=468642&rh=n%3A468642%2Cp_n_deal_type%3A23566065011&dc", True),
-    # Nodos de categoría por consola dentro de Videojuegos (468642), ordenados
-    # por precio ascendente -> el más barato aparece primero.
-    ("PS5 baratos", "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A20972781011&s=price-asc-rank", False),
-    ("PS4 baratos", "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A6427814011&s=price-asc-rank", False),
-    ("Switch 2 baratos", "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A206234609011&s=price-asc-rank", False),
-    ("Switch baratos", "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A16227128011&s=price-asc-rank", False),
+    # Búsqueda por palabra clave (no por nodo de categoría -> el nodo trae
+    # accesorios/hardware mezclados con juegos; la búsqueda trae casi solo
+    # juegos), ordenada por precio ascendente. "Precio: menor a mayor" de
+    # Amazon mezcla relevancia con precio, así que no es 100% exacto, pero
+    # es mucho más limpio que navegar por categoría.
+    ("PS5 baratos", "https://www.amazon.com/s?k=ps5+games&i=videogames&s=price-asc-rank", False),
+    ("PS4 baratos", "https://www.amazon.com/s?k=ps4+games&i=videogames&s=price-asc-rank", False),
+    ("Switch 2 baratos", "https://www.amazon.com/s?k=nintendo+switch+2+games&i=videogames&s=price-asc-rank", False),
+    ("Switch baratos", "https://www.amazon.com/s?k=nintendo+switch+games&i=videogames&s=price-asc-rank", False),
 ]
 
 HEADERS_POOL = [
