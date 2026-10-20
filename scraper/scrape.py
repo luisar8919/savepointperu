@@ -19,11 +19,21 @@ from playwright.async_api import async_playwright
 
 MARGEN = 1.3  # precio_venta = precio_oferta (lo que de verdad pagás) * MARGEN
 DESCUENTO_MINIMO = 20  # % — por debajo de esto no vale la pena mostrarlo como "oferta"
+PRECIO_MAX_BARATOS_USD = 20  # para la sección "menos de $20", sin importar descuento
 
 URLS_OBJETIVO = [
     "https://www.amazon.com/deals?deals-widget=%7B%22version%22%3A1%2C%22browseNodeId%22%3A%22468642%22%7D",
     "https://www.amazon.com/s?i=videogames&bbn=468642&rh=n%3A468642%2Cp_n_deal_type%3A23566065011&dc",
 ]
+
+# Nodos de categoría por consola dentro de Videojuegos (468642), ordenados por
+# precio ascendente -> el más barato aparece primero.
+URLS_BARATOS = {
+    "PS5": "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A20972781011&s=price-asc-rank",
+    "PS4": "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A6427814011&s=price-asc-rank",
+    "Switch 2": "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A206234609011&s=price-asc-rank",
+    "Switch": "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A16227128011&s=price-asc-rank",
+}
 
 HEADERS_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -57,7 +67,22 @@ def calcular_descuento(precio_original, precio_actual):
     return None
 
 
-async def scrapear_pagina_resultados(page, url: str) -> list[dict]:
+def obtener_tasa_pen_a_usd() -> float:
+    """Solo para decidir si un precio en soles entra en el tope de $20 de la
+    sección "baratos" -> nunca se usa para convertir lo que se guarda o se
+    muestra (eso sigue siendo tal cual lo da Amazon)."""
+    try:
+        r = requests.get("https://open.er-api.com/v6/latest/PEN", timeout=10)
+        r.raise_for_status()
+        return r.json()["rates"]["USD"]
+    except Exception as e:
+        print(f"No se pudo obtener tasa PEN->USD, uso 0.27 por defecto: {e}")
+        return 0.27
+
+
+async def scrapear_pagina_resultados(
+    page, url: str, requiere_descuento: bool = True, tasa_pen_usd: float = 0.27
+) -> list[dict]:
     ofertas = []
     print(f"Navegando a: {url}")
     await page.goto(url, wait_until="domcontentloaded", timeout=60000)
@@ -132,13 +157,24 @@ async def scrapear_pagina_resultados(page, url: str) -> list[dict]:
             precio_original_txt = precio_original_el.get_text(strip=True) if precio_original_el else None
             precio_original = limpiar_precio(precio_original_txt)
 
-            if not precio_original:
-                # sin precio de referencia no podemos calcular precio_venta
-                continue
-
-            descuento_num = calcular_descuento(precio_original, precio_actual)
-            if not descuento_num or descuento_num < DESCUENTO_MINIMO:
-                continue
+            if requiere_descuento:
+                if not precio_original:
+                    # sin precio de referencia no podemos calcular el % de descuento
+                    continue
+                descuento_num = calcular_descuento(precio_original, precio_actual)
+                if not descuento_num or descuento_num < DESCUENTO_MINIMO:
+                    continue
+            else:
+                # sección "menos de $20": no exige descuento, solo tope de precio.
+                # Como la página viene ordenada de más barato a más caro, en
+                # cuanto se pasa del tope ya no hace falta seguir revisando.
+                if precio_actual is None:
+                    continue
+                precio_usd_equiv = precio_actual * tasa_pen_usd if moneda == "PEN" else precio_actual
+                if precio_usd_equiv > PRECIO_MAX_BARATOS_USD:
+                    break
+                precio_original = precio_original or precio_actual
+                descuento_num = calcular_descuento(precio_original, precio_actual) or 0
 
             img_el = tarjeta.select_one("img.s-image")
             imagen_url = img_el["src"] if img_el and img_el.get("src") else None
@@ -175,7 +211,20 @@ async def scrapear_multiples_paginas(page, url_base: str, max_paginas: int = 3) 
     return todas
 
 
+async def scrapear_baratos(page, tasa_pen_usd: float) -> list[dict]:
+    """Juegos de Switch/Switch 2/PS5/PS4 por debajo de PRECIO_MAX_BARATOS_USD,
+    sin importar si tienen descuento o no."""
+    todos = []
+    for plataforma, url in URLS_BARATOS.items():
+        resultado = await scrapear_pagina_resultados(page, url, requiere_descuento=False, tasa_pen_usd=tasa_pen_usd)
+        print(f"{plataforma}: {len(resultado)} juegos bajo ${PRECIO_MAX_BARATOS_USD}")
+        todos.extend(resultado)
+        await asyncio.sleep(random.uniform(3, 6))
+    return todos
+
+
 async def scrapear_ofertas() -> list[dict]:
+    tasa_pen_usd = obtener_tasa_pen_a_usd()
     todas_las_ofertas = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -203,6 +252,8 @@ async def scrapear_ofertas() -> list[dict]:
             ofertas = await scrapear_multiples_paginas(page, url, max_paginas=3)
             todas_las_ofertas.extend(ofertas)
             await asyncio.sleep(random.uniform(4, 7))
+
+        todas_las_ofertas.extend(await scrapear_baratos(page, tasa_pen_usd))
 
         await browser.close()
 
