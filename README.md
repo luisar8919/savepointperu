@@ -5,7 +5,11 @@ compra/entrega manual.
 
 ## Reglas de negocio
 
-- Precio de venta = precio normal del juego × 1.3 (ignora el % de descuento puntual).
+- Precio de venta = lo que realmente pagás en Amazon (precio de oferta) × 1.3
+  — margen fijo de 30% sobre tu costo real, sin convertir moneda (se muestra
+  tal cual Amazon la dé, USD o PEN).
+- Solo se guardan ofertas con 20% de descuento o más (`DESCUENTO_MINIMO` en
+  `scraper/scrape.py`), ordenadas de mejor a peor.
 - Los pedidos pagados se agrupan en lotes hasta llegar a envío gratis + $50 en Amazon.
 - Si un lote no se completa en 7 días, el sistema avisa y la decisión (comprar
   suelto / seguir esperando / reembolsar) la tomás vos, caso por caso.

@@ -17,7 +17,7 @@ from datetime import datetime
 import requests
 from playwright.async_api import async_playwright
 
-MARGEN = 1.3  # precio_venta = precio_normal * MARGEN
+MARGEN = 1.3  # precio_venta = precio_oferta (lo que de verdad pagás) * MARGEN
 DESCUENTO_MINIMO = 20  # % — por debajo de esto no vale la pena mostrarlo como "oferta"
 
 URLS_OBJETIVO = [
@@ -151,7 +151,7 @@ async def scrapear_pagina_resultados(page, url: str) -> list[dict]:
                 "moneda": moneda,
                 "precio_normal": precio_original,
                 "precio_oferta": precio_actual,
-                "precio_venta": round(precio_original * MARGEN, 2),
+                "precio_venta": round(precio_actual * MARGEN, 2),
                 "descuento_pct": descuento_num,  # no se guarda en Supabase, solo para ordenar/avisar
                 "disponible": True,
                 "actualizado_at": datetime.now().isoformat(),
