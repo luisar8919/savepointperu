@@ -20,20 +20,20 @@ from playwright.async_api import async_playwright
 MARGEN = 1.3  # precio_venta = precio_oferta (lo que de verdad pagás) * MARGEN
 DESCUENTO_MINIMO = 20  # % — por debajo de esto no vale la pena mostrarlo como "oferta"
 PRECIO_MAX_BARATOS_USD = 20  # para la sección "menos de $20", sin importar descuento
+ESPERA_ENTRE_BUSQUEDAS_SEG = (10, 20)  # pausa aleatoria entre cada búsqueda/página
 
-URLS_OBJETIVO = [
-    "https://www.amazon.com/deals?deals-widget=%7B%22version%22%3A1%2C%22browseNodeId%22%3A%22468642%22%7D",
-    "https://www.amazon.com/s?i=videogames&bbn=468642&rh=n%3A468642%2Cp_n_deal_type%3A23566065011&dc",
+# Cada tarea: (nombre, url, requiere_descuento). El orden en que se corren se
+# mezcla al azar en cada corrida (ver scrapear_ofertas).
+TAREAS = [
+    ("Ofertas (deals)", "https://www.amazon.com/deals?deals-widget=%7B%22version%22%3A1%2C%22browseNodeId%22%3A%22468642%22%7D", True),
+    ("Ofertas (búsqueda)", "https://www.amazon.com/s?i=videogames&bbn=468642&rh=n%3A468642%2Cp_n_deal_type%3A23566065011&dc", True),
+    # Nodos de categoría por consola dentro de Videojuegos (468642), ordenados
+    # por precio ascendente -> el más barato aparece primero.
+    ("PS5 baratos", "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A20972781011&s=price-asc-rank", False),
+    ("PS4 baratos", "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A6427814011&s=price-asc-rank", False),
+    ("Switch 2 baratos", "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A206234609011&s=price-asc-rank", False),
+    ("Switch baratos", "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A16227128011&s=price-asc-rank", False),
 ]
-
-# Nodos de categoría por consola dentro de Videojuegos (468642), ordenados por
-# precio ascendente -> el más barato aparece primero.
-URLS_BARATOS = {
-    "PS5": "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A20972781011&s=price-asc-rank",
-    "PS4": "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A6427814011&s=price-asc-rank",
-    "Switch 2": "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A206234609011&s=price-asc-rank",
-    "Switch": "https://www.amazon.com/s?i=videogames&rh=n%3A468642%2Cn%3A16227128011&s=price-asc-rank",
-}
 
 HEADERS_POOL = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -201,39 +201,24 @@ async def scrapear_pagina_resultados(
     return ofertas, agoto_pagina
 
 
-async def scrapear_multiples_paginas(page, url_base: str, max_paginas: int = 3) -> list[dict]:
+async def ejecutar_tarea(page, nombre: str, url: str, requiere_descuento: bool, tasa_pen_usd: float) -> list[dict]:
+    """Pagina una búsqueda hasta 3 páginas, o hasta que no haya más resultados,
+    o (en modo "barato") hasta que el precio se pase del tope."""
     todas = []
-    for n_pagina in range(1, max_paginas + 1):
-        url = f"{url_base}&page={n_pagina}" if n_pagina > 1 else url_base
-        resultado, _ = await scrapear_pagina_resultados(page, url)
+    for n_pagina in range(1, 4):
+        url_pag = f"{url}&page={n_pagina}" if n_pagina > 1 else url
+        resultado, agoto_pagina = await scrapear_pagina_resultados(
+            page, url_pag, requiere_descuento=requiere_descuento, tasa_pen_usd=tasa_pen_usd
+        )
         todas.extend(resultado)
         if not resultado:
             break
-        await asyncio.sleep(random.uniform(3, 6))
+        await asyncio.sleep(random.uniform(*ESPERA_ENTRE_BUSQUEDAS_SEG))
+        if not agoto_pagina:
+            break  # modo "barato": ya se pasó del tope de precio
+    if not requiere_descuento:
+        print(f"{nombre}: {len(todas)} juegos bajo ${PRECIO_MAX_BARATOS_USD}")
     return todas
-
-
-async def scrapear_baratos(page, tasa_pen_usd: float) -> list[dict]:
-    """Juegos de Switch/Switch 2/PS5/PS4 por debajo de PRECIO_MAX_BARATOS_USD,
-    sin importar si tienen descuento o no. Pagina hasta 3 páginas por
-    plataforma, o hasta que un precio se pase del tope (lo que pase primero) —
-    la página 1 suele venir llena de accesorios baratos, los juegos reales
-    aparecen más adelante."""
-    todos = []
-    for plataforma, url in URLS_BARATOS.items():
-        encontrados = 0
-        for n_pagina in range(1, 4):
-            url_pag = f"{url}&page={n_pagina}" if n_pagina > 1 else url
-            resultado, agoto_pagina = await scrapear_pagina_resultados(
-                page, url_pag, requiere_descuento=False, tasa_pen_usd=tasa_pen_usd
-            )
-            todos.extend(resultado)
-            encontrados += len(resultado)
-            await asyncio.sleep(random.uniform(3, 6))
-            if not agoto_pagina or not resultado:
-                break  # se pasó del tope de precio o no hay más resultados
-        print(f"{plataforma}: {encontrados} juegos bajo ${PRECIO_MAX_BARATOS_USD}")
-    return todos
 
 
 async def scrapear_ofertas() -> list[dict]:
@@ -264,12 +249,14 @@ async def scrapear_ofertas() -> list[dict]:
         """)
         page = await context.new_page()
 
-        for url in URLS_OBJETIVO:
-            ofertas = await scrapear_multiples_paginas(page, url, max_paginas=3)
-            todas_las_ofertas.extend(ofertas)
-            await asyncio.sleep(random.uniform(4, 7))
-
-        todas_las_ofertas.extend(await scrapear_baratos(page, tasa_pen_usd))
+        tareas = TAREAS.copy()
+        random.shuffle(tareas)
+        for i, (nombre, url, requiere_descuento) in enumerate(tareas):
+            todas_las_ofertas.extend(
+                await ejecutar_tarea(page, nombre, url, requiere_descuento, tasa_pen_usd)
+            )
+            if i < len(tareas) - 1:
+                await asyncio.sleep(random.uniform(*ESPERA_ENTRE_BUSQUEDAS_SEG))
 
         await browser.close()
 
