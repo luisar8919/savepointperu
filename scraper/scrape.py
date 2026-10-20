@@ -18,6 +18,7 @@ import requests
 from playwright.async_api import async_playwright
 
 MARGEN = 1.3  # precio_venta = precio_normal * MARGEN
+DESCUENTO_MINIMO = 20  # % — por debajo de esto no vale la pena mostrarlo como "oferta"
 
 URLS_OBJETIVO = [
     "https://www.amazon.com/deals?deals-widget=%7B%22version%22%3A1%2C%22browseNodeId%22%3A%22468642%22%7D",
@@ -136,7 +137,7 @@ async def scrapear_pagina_resultados(page, url: str) -> list[dict]:
                 continue
 
             descuento_num = calcular_descuento(precio_original, precio_actual)
-            if not descuento_num:
+            if not descuento_num or descuento_num < DESCUENTO_MINIMO:
                 continue
 
             img_el = tarjeta.select_one("img.s-image")
@@ -151,6 +152,7 @@ async def scrapear_pagina_resultados(page, url: str) -> list[dict]:
                 "precio_normal": precio_original,
                 "precio_oferta": precio_actual,
                 "precio_venta": round(precio_original * MARGEN, 2),
+                "descuento_pct": descuento_num,  # no se guarda en Supabase, solo para ordenar/avisar
                 "disponible": True,
                 "actualizado_at": datetime.now().isoformat(),
             })
@@ -210,6 +212,7 @@ async def scrapear_ofertas() -> list[dict]:
         if o["asin"] not in vistos:
             vistos.add(o["asin"])
             unicas.append(o)
+    unicas.sort(key=lambda o: o["descuento_pct"], reverse=True)
     return unicas
 
 
@@ -221,7 +224,8 @@ def guardar_en_supabase(ofertas: list[dict]) -> None:
         "Content-Type": "application/json",
         "Prefer": "resolution=merge-duplicates",
     }
-    resp = requests.post(f"{url}?on_conflict=asin", json=ofertas, headers=headers, timeout=30)
+    filas = [{k: v for k, v in o.items() if k != "descuento_pct"} for o in ofertas]
+    resp = requests.post(f"{url}?on_conflict=asin", json=filas, headers=headers, timeout=30)
     resp.raise_for_status()
 
 
@@ -249,10 +253,10 @@ def main():
 
     guardar_en_supabase(ofertas)
 
-    top = sorted(ofertas, key=lambda o: o["precio_normal"] - o["precio_oferta"], reverse=True)[:5]
-    lineas = [f"🎮 {len(ofertas)} ofertas encontradas hoy:"]
+    top = ofertas[:5]  # ya vienen ordenadas por % de descuento, de mayor a menor
+    lineas = [f"🎮 {len(ofertas)} ofertas (≥{DESCUENTO_MINIMO}% off) encontradas hoy:"]
     for o in top:
-        lineas.append(f"- {o['titulo'][:50]} → venta {o['moneda']} {o['precio_venta']} (compra {o['moneda']} {o['precio_oferta']})")
+        lineas.append(f"- {o['titulo'][:50]} (-{o['descuento_pct']}%) → venta {o['moneda']} {o['precio_venta']} (compra {o['moneda']} {o['precio_oferta']})")
     avisar_telegram("\n".join(lineas))
 
 
