@@ -19,23 +19,27 @@ from playwright.async_api import async_playwright
 
 MARGEN = 1.3  # precio_venta = precio_oferta (lo que de verdad pagás) * MARGEN
 DESCUENTO_MINIMO = 20  # % — por debajo de esto no vale la pena mostrarlo como "oferta"
-PRECIO_MAX_BARATOS_USD = 20  # para la sección "menos de $20", sin importar descuento
+PRECIO_MAX_BARATOS_USD = 35  # para la sección "baratos", sin importar descuento
 ESPERA_ENTRE_BUSQUEDAS_SEG = (10, 20)  # pausa aleatoria entre cada búsqueda/página
+
+_FILTRO_PRECIO = f"p_36%3A-{int(PRECIO_MAX_BARATOS_USD * 100)}"  # rh de Amazon, precio en centavos
 
 # Cada tarea: (nombre, url, requiere_descuento). El orden en que se corren se
 # mezcla al azar en cada corrida (ver scrapear_ofertas).
 TAREAS = [
     ("Ofertas (deals)", "https://www.amazon.com/deals?deals-widget=%7B%22version%22%3A1%2C%22browseNodeId%22%3A%22468642%22%7D", True),
     ("Ofertas (búsqueda)", "https://www.amazon.com/s?i=videogames&bbn=468642&rh=n%3A468642%2Cp_n_deal_type%3A23566065011&dc", True),
-    # Búsqueda por palabra clave (no por nodo de categoría -> el nodo trae
-    # accesorios/hardware mezclados con juegos; la búsqueda trae casi solo
-    # juegos), ordenada por precio ascendente. "Precio: menor a mayor" de
-    # Amazon mezcla relevancia con precio, así que no es 100% exacto, pero
-    # es mucho más limpio que navegar por categoría.
-    ("PS5 baratos", "https://www.amazon.com/s?k=ps5+games&i=videogames&s=price-asc-rank", False),
-    ("PS4 baratos", "https://www.amazon.com/s?k=ps4+games&i=videogames&s=price-asc-rank", False),
-    ("Switch 2 baratos", "https://www.amazon.com/s?k=nintendo+switch+2+games&i=videogames&s=price-asc-rank", False),
-    ("Switch baratos", "https://www.amazon.com/s?k=nintendo+switch+games&i=videogames&s=price-asc-rank", False),
+    # rh=p_36 es el filtro de precio real de Amazon (lo encontró el usuario
+    # probando en el propio sitio) -> mucho más confiable que cortar nosotros
+    # mismos al escanear tarjetas. Para PS5 usamos el nodo "Juegos de
+    # PlayStation 5" (20972797011), más limpio que una palabra clave; para el
+    # resto no encontramos el nodo específico todavía, así que es búsqueda +
+    # filtro de precio (algo de ruido de accesorios se cuela igual, se filtra
+    # con keywords_accesorios más abajo).
+    ("PS5 baratos", f"https://www.amazon.com/s?i=videogames&rh=n%3A20972797011%2C{_FILTRO_PRECIO}&s=price-asc-rank", False),
+    ("PS4 baratos", f"https://www.amazon.com/s?k=ps4+games&i=videogames&rh={_FILTRO_PRECIO}&s=price-asc-rank", False),
+    ("Switch 2 baratos", f"https://www.amazon.com/s?k=nintendo+switch+2+games&i=videogames&rh={_FILTRO_PRECIO}&s=price-asc-rank", False),
+    ("Switch baratos", f"https://www.amazon.com/s?k=nintendo+switch+games&i=videogames&rh={_FILTRO_PRECIO}&s=price-asc-rank", False),
 ]
 
 HEADERS_POOL = [
